@@ -4,7 +4,7 @@ import { Poster } from '../components/Poster';
 import { Selected } from '../components/Selected';
 
 export const MainPage = () => {
-  // Configuración  de categorías
+  // Configuración de categorías: cada objeto tiene una clave 'id' (para buscar en datos/form) y un texto 'label' para mostrar en la interfaz.
   const categories = [
     { id: 'pelicula', label: 'Mejor Película' },
     { id: 'pelicula_animada', label: 'Película Animada' },
@@ -12,27 +12,29 @@ export const MainPage = () => {
     { id: 'actor', label: 'Mejor Actor' }
   ];
 
-  // Estados simples
-  const [nominees, setNominees] = useState([]);
-  const [predictions, setPredictions] = useState([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [form, setForm] = useState({
+  const [nominees, setNominees] = useState([]); //  todos los nominados traídos de SupaBase
+  const [predictions, setPredictions] = useState([]); // todas las predicciones hechas
+  const [currentIndex, setCurrentIndex] = useState(0); // Índice compartido para mostrar cada póster 
+  const [form, setForm] = useState({    
     name: '',
     pelicula: '',
     pelicula_animada: '',
     efectos: '',
     actor: ''
   });
-  const [editingId, setEditingId] = useState(null);
+  const [editingId, setEditingId] = useState(null); // Si editingId es null => crear nueva; si tiene un número => editar esa predicción
   const [modalOpen, setModalOpen] = useState(false);
 
-  // Cargar datos
+  // Cargar datos al montar el componente
   useEffect(() => {
     const loadData = async () => {
       try {
+        // Traer todos los nominados
         const { data: nomineesData } = await supabase.from('nominees').select('*');
+        // Traer todas las predicciones
         const { data: predictionsData } = await supabase.from('predictions').select('*');
         
+        // Si no hay resultados, usar array vacío
         setNominees(nomineesData || []);
         setPredictions(predictionsData || []);
       } catch (error) {
@@ -41,9 +43,9 @@ export const MainPage = () => {
     };
     
     loadData();
-  }, []);
+  }, []); // usamos [] para que solo se ejecuta una vez al montar
 
-  // Agrupar nominados 
+  // Agrupar nominados por categoría. Cada propiedad filtra por su campo 'categoria'.
   const groupedNominees = {
     pelicula: nominees.filter(n => n.categoria === 'pelicula'),
     pelicula_animada: nominees.filter(n => n.categoria === 'pelicula_animada'),
@@ -51,46 +53,50 @@ export const MainPage = () => {
     actor: nominees.filter(n => n.categoria === 'actor')
   };
 
-  // Navegación 
+  // Ir al póster anterior si no estamos en el índice 0
   const showPrevious = () => {
     if (currentIndex > 0) {
       setCurrentIndex(currentIndex - 1);
     }
   };
 
+  // Ir al póster siguiente, calculando primero el largo máximo entre las categorías
   const showNext = () => {
-    // Calcular el máximo de items 
     let maxItems = 0;
+    // Recorremos cada categoría para hallar cuántos elementos tiene
     categories.forEach(cat => {
       const categoryItems = groupedNominees[cat.id].length;
       if (categoryItems > maxItems) {
         maxItems = categoryItems;
       }
     });
-    
+    // Solo incrementamos si no excedemos el tamaño de la lista más larga
     if (currentIndex < maxItems - 1) {
       setCurrentIndex(currentIndex + 1);
     }
   };
 
-  // Manejo del formulario
+  // Actualiza el estado del formulario al cambiar un campo
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setForm(prev => ({ ...prev, [name]: value }));
   };
 
-  // Guardar predicción
+  // Enviar formulario ya sea crear o actualizar la predicción en SupaBase
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
       if (editingId) {
+        // Para actualizar registro existente
         const { data } = await supabase
           .from('predictions')
           .update(form)
           .eq('id', editingId)
           .select();
+        // Reemplazamos esa predicción en el estado local
         setPredictions(predictions.map(p => p.id === editingId ? data[0] : p));
       } else {
+        // Para insertar un nuevo registro
         const { data } = await supabase
           .from('predictions')
           .insert([form])
@@ -103,7 +109,7 @@ export const MainPage = () => {
     }
   };
 
-  // Abrir modal para crear o editar
+  // Abre el modal; si pasamos una predicción, cargamos sus valores para editar
   const openForm = (prediction = null) => {
     setForm(prediction || {
       name: '',
@@ -112,11 +118,12 @@ export const MainPage = () => {
       efectos: '',
       actor: ''
     });
+    // Usamos el "prediction?.id" para evitar error si prediction es null o undefined
     setEditingId(prediction?.id || null);
     setModalOpen(true);
   };
 
-  // Eliminar predicción
+  // Eliminar predicción según su id
   const deletePrediction = async (id) => {
     try {
       await supabase.from('predictions').delete().eq('id', id);
@@ -132,18 +139,20 @@ export const MainPage = () => {
         Predicciones de los Óscares
       </h1>
 
-      {/* Grid de pósters */}
+      {/* Grid de pósters con un contenedor de 4 columnas */}
       <div className="max-w-6xl mx-auto grid grid-cols-4 gap-6 mb-4">
         {categories.map(cat => {
-          const categoryNominees = groupedNominees[cat.id] || [];
-          const nominee = categoryNominees[currentIndex] || null;
+          const categoryNominees = groupedNominees[cat.id] || []; // Tomar arreglo de nominados para esta categoría; si no existe, usar []
+          const nominee = categoryNominees[currentIndex] || null; // Tomar el elemento en currentIndex; si no existe, null
           
           return (
             <div key={cat.id} className="text-center">
               <h1 className="text-lg font-semibold mb-2 text-gray-700">{cat.label}</h1>
               {nominee ? (
+                // Si hay datos, mostrar componente Poster
                 <Poster url={nominee.imagen_url} title={nominee.titulo} />
               ) : (
+                // Placeholder gris si no hay imagen en esa posición
                 <div className="w-full h-48 bg-gray-100 rounded-lg shadow-lg" />
               )}
             </div>
@@ -171,7 +180,7 @@ export const MainPage = () => {
         </button>
       </div>
 
-      {/* Botón para nueva predicción */}
+      {/* Botón para abrir modal de nueva predicción */}
       <div className="text-center mb-8">
         <button
           onClick={() => openForm()}
@@ -187,6 +196,7 @@ export const MainPage = () => {
           <thead>
             <tr className="bg-blue-100 text-center">
               <th className="px-4 py-3">Nombre</th>
+              {/* Columnas dinámicas según categorías */}
               {categories.map(cat => (
                 <th key={cat.id} className="px-4 py-3">{cat.label}</th>
               ))}
@@ -196,6 +206,7 @@ export const MainPage = () => {
           <tbody>
             {predictions.length === 0 ? (
               <tr>
+                {/* colSpan = número de categorías + “Nombre” + “Acciones” */}
                 <td colSpan={categories.length + 2} className="px-4 py-6 text-center text-gray-500">
                   Aún no hay predicciones.
                 </td>
@@ -205,7 +216,7 @@ export const MainPage = () => {
                 <tr key={p.id} className="border-t hover:bg-gray-50">
                   <td className="px-4 py-2">{p.name}</td>
                   {categories.map(cat => (
-                    <td key={`${p.id}-${cat.id}`} className="px-4 py-2">{p[cat.id]}</td>
+                    <td key={`${p.id}-${cat.id}`} className="px-4 py-2">{p[cat.id]}</td> // p[cat.id] accede dinámicamente a p.pelicula, p.actor, etc.
                   ))}
                   <td className="px-4 py-2 space-x-2">
                     <button
@@ -228,7 +239,7 @@ export const MainPage = () => {
         </table>
       </div>
 
-      {/* Modal */}
+      {/* Modal de creación/edición */}
       {modalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <form onSubmit={handleSubmit} className="bg-white w-full max-w-md p-6 rounded-lg shadow-lg">
@@ -245,6 +256,7 @@ export const MainPage = () => {
               className="mt-1 w-full border border-gray-300 rounded px-3 py-2 mb-4 focus:outline-none focus:ring focus:border-blue-300"
             />
 
+            {/* Un campo <Selected> por cada categoría */}
             {categories.map(cat => (
               <Selected
                 key={cat.id}
@@ -252,7 +264,7 @@ export const MainPage = () => {
                 name={cat.id}
                 value={form[cat.id]}
                 onChange={handleInputChange}
-                options={groupedNominees[cat.id]}
+                options={groupedNominees[cat.id]} // Lista de nominados filtrados por categoría
               />
             ))}
 
