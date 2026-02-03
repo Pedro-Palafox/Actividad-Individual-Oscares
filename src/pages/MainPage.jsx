@@ -45,9 +45,6 @@ export const MainPage = () => {
   const [activeAdminTab, setActiveAdminTab] = useState("predictions"); // "predictions" | "winners"
   const [winnerModalCategoryId, setWinnerModalCategoryId] = useState(null); // para abrir modal de elegir ganador
 
-  // "predictions" | "winners"
-
-
   // -----------------------------
   // Auth bootstrap
   // -----------------------------
@@ -113,7 +110,7 @@ export const MainPage = () => {
   };
 
   // -----------------------------
-  // Load data
+  // Load data (categorías, nominados, predicciones)
   // -----------------------------
   useEffect(() => {
     const load = async () => {
@@ -146,20 +143,48 @@ export const MainPage = () => {
 
     load();
   }, []);
-  // Construir un diccionario: { [categoryId]: nomineeWinnerRow }
-const winnersByCategory = React.useMemo(() => {
-  const map = {};
-  nominees.forEach((n) => {
-    if (n.is_winner) {
-      map[n.category_id] = n;
-    }
-  });
-  return map;
-}, [nominees]);
 
-// Calcular marcador: [{ id, name, points }]
+  // -----------------------------
+  // Cargar settings globales (app_settings)
+  // -----------------------------
+  useEffect(() => {
+    const loadAppSettings = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("app_settings")
+          .select("hide_others_picks, scoreboard_on_top")
+          .eq("year", YEAR)
+          .single();
+
+        if (error) {
+          console.error("Error cargando app_settings:", error);
+          return;
+        }
+
+        if (data) {
+          setHideOthersPicks(!!data.hide_others_picks);
+          setScoreboardFirst(!!data.scoreboard_on_top);
+        }
+      } catch (err) {
+        console.error("Error inesperado cargando app_settings:", err);
+      }
+    };
+
+    loadAppSettings();
+  }, []);
+
+  // Construir un diccionario: { [categoryId]: nomineeWinnerRow }
+  const winnersByCategory = React.useMemo(() => {
+    const map = {};
+    nominees.forEach((n) => {
+      if (n.is_winner) {
+        map[n.category_id] = n;
+      }
+    });
+    return map;
+  }, [nominees]);
+
   // Calcular marcador: [{ id, name, points }]
-    // Calcular marcador: [{ id, name, points }]
   const scoreboard = React.useMemo(() => {
     if (!predictions || predictions.length === 0) return [];
 
@@ -188,10 +213,10 @@ const winnersByCategory = React.useMemo(() => {
         return a.name.localeCompare(b.name);
       });
   }, [predictions, categories, winnersByCategory]);
-    // Helpers para marcador (top 3 + resto)
+
+  // Helpers para marcador (top 3 + resto)
   const top3 = scoreboard.slice(0, 3);
   const restOfScoreboard = scoreboard.slice(3);
-
 
   const groupedNominees = useMemo(() => {
     const map = {};
@@ -225,9 +250,23 @@ const winnersByCategory = React.useMemo(() => {
     );
 
   // -----------------------------
+  // Predicción del usuario logueado
+  // -----------------------------
+  const myPrediction = useMemo(() => {
+    if (!user) return null;
+    const email = (user.email || "").toLowerCase();
+
+    return (
+      predictions.find(
+        (p) => (p.email || "").toLowerCase() === email
+      ) || null
+    );
+  }, [predictions, user]);
+
+  // -----------------------------
   // Modal predicción
   // -----------------------------
-    const openForm = (prediction = null) => {
+  const openForm = (prediction = null) => {
     if (!user) {
       setAuthMessage(
         "Inicia sesión con tu correo para poder hacer predicciones."
@@ -252,7 +291,6 @@ const winnersByCategory = React.useMemo(() => {
 
     setModalOpen(true);
   };
-
 
   const closeForm = () => {
     setModalOpen(false);
@@ -291,9 +329,8 @@ const winnersByCategory = React.useMemo(() => {
 
       if (!form.name.trim()) return;
 
-            if (editingId || myPrediction) {
-        // Si estoy editando explícitamente o ya tengo una predicción previa,
-        // hago UPDATE en lugar de INSERT.
+      if (editingId || myPrediction) {
+        // UPDATE
         const idToUpdate = editingId || myPrediction.id;
 
         const { data, error } = await supabase
@@ -314,7 +351,7 @@ const winnersByCategory = React.useMemo(() => {
           prev.map((p) => (p.id === idToUpdate ? updated : p))
         );
       } else {
-        // Primera vez que este correo crea una predicción
+        // INSERT
         const { data, error } = await supabase
           .from("predictions")
           .insert([
@@ -332,7 +369,6 @@ const winnersByCategory = React.useMemo(() => {
 
         setPredictions((prev) => [data[0], ...prev]);
       }
-
 
       closeForm();
     } catch (err) {
@@ -353,7 +389,7 @@ const winnersByCategory = React.useMemo(() => {
   // -----------------------------
   // Admin panel helpers
   // -----------------------------
-    const adminFilteredPredictions = useMemo(() => {
+  const adminFilteredPredictions = useMemo(() => {
     const f = adminFilter.trim().toLowerCase();
     if (!f) return predictions;
     return predictions.filter((p) => {
@@ -362,19 +398,6 @@ const winnersByCategory = React.useMemo(() => {
       return email.includes(f) || name.includes(f);
     });
   }, [adminFilter, predictions]);
-
-  // 👉 Predicción del usuario logueado (una por correo)
-  const myPrediction = useMemo(() => {
-    if (!user) return null;
-    const email = (user.email || "").toLowerCase();
-
-    return (
-      predictions.find(
-        (p) => (p.email || "").toLowerCase() === email
-      ) || null
-    );
-  }, [predictions, user]);
-
 
   const handleAdminBulkDelete = async () => {
     const f = adminFilter.trim().toLowerCase();
@@ -393,7 +416,8 @@ const winnersByCategory = React.useMemo(() => {
       console.error("Error borrando en bloque:", err);
     }
   };
-      const handleSetWinner = async (categoryId, nomineeId) => {
+
+  const handleSetWinner = async (categoryId, nomineeId) => {
     try {
       // 1) limpiar ganadores previos de esa categoría
       const { error: clearErr } = await supabase
@@ -425,7 +449,44 @@ const winnersByCategory = React.useMemo(() => {
     }
   };
 
+  // -----------------------------
+  // Actualizar settings globales en app_settings (solo admin)
+  // -----------------------------
+  const updateGlobalSettings = async (patch) => {
+    if (!isAdmin) {
+      console.warn("Solo el admin puede cambiar los ajustes globales.");
+      return;
+    }
 
+    try {
+      // Optimistic update en el front
+      if (Object.prototype.hasOwnProperty.call(patch, "hide_others_picks")) {
+        setHideOthersPicks(!!patch.hide_others_picks);
+      }
+      if (Object.prototype.hasOwnProperty.call(patch, "scoreboard_on_top")) {
+        setScoreboardFirst(!!patch.scoreboard_on_top);
+      }
+
+      const { data, error } = await supabase
+        .from("app_settings")
+        .update(patch)
+        .eq("year", YEAR)
+        .select("hide_others_picks, scoreboard_on_top")
+        .single();
+
+      if (error) {
+        console.error("Error actualizando app_settings:", error);
+        return;
+      }
+
+      if (data) {
+        setHideOthersPicks(!!data.hide_others_picks);
+        setScoreboardFirst(!!data.scoreboard_on_top);
+      }
+    } catch (err) {
+      console.error("Error inesperado actualizando app_settings:", err);
+    }
+  };
 
   // -----------------------------------
   // Styles (Oscars)
@@ -517,18 +578,20 @@ const winnersByCategory = React.useMemo(() => {
       </div>
     );
   };
+
   const CrownIcon = () => (
-  <svg
-    viewBox="0 0 128 128"
-    className="w-10 h-10 mb-2"
-    style={{
-      fill: OSCAR_GOLD,
-      filter: "drop-shadow(0 0 6px rgba(212,175,55,0.6))",
-    }}
-  >
-    <path d="M128 53.279c0 5.043-4.084 9.136-9.117 9.136-.091 0-.164 0-.255-.018l-8.914 34.06H18.286L8.734 65.01C3.884 64.81 0 60.808 0 55.892c0-5.043 4.084-9.136 9.117-9.136 5.032 0 9.117 4.093 9.117 9.136a9.557 9.557 0 0 1-.492 2.997l22.081 12.919 18.671-34.371a9.1 9.1 0 0 1-4.267-7.729c0-5.043 4.084-9.136 9.117-9.136s9.117 4.093 9.117 9.136a9.1 9.1 0 0 1-4.267 7.729l18.671 34.371 24.05-14.07a9.164 9.164 0 0 1-1.149-4.459c0-5.062 4.084-9.136 9.117-9.136 5.033 0 9.117 4.075 9.117 9.136zm-18.286 46.835H18.286v7.314h91.429v-7.314z" />
-  </svg>
-);
+    <svg
+      viewBox="0 0 128 128"
+      className="w-10 h-10 mb-2"
+      style={{
+        fill: OSCAR_GOLD,
+        filter: "drop-shadow(0 0 6px rgba(212,175,55,0.6))",
+      }}
+    >
+      <path d="M128 53.279c0 5.043-4.084 9.136-9.117 9.136-.091 0-.164 0-.255-.018l-8.914 34.06H18.286L8.734 65.01C3.884 64.81 0 60.808 0 55.892c0-5.043 4.084-9.136 9.117-9.136 5.032 0 9.117 4.093 9.117 9.136a9.557 9.557 0 0 1-.492 2.997l22.081 12.919 18.671-34.371a9.1 9.1 0 0 1-4.267-7.729c0-5.043 4.084-9.136 9.117-9.136s9.117 4.093 9.117 9.136a9.1 9.1 0 0 1-4.267 7.729l18.671 34.371 24.05-14.07a9.164 9.164 0 0 1-1.149-4.459c0-5.062 4.084-9.136 9.117-9.136 5.033 0 9.117 4.075 9.117 9.136zm-18.286 46.835H18.286v7.314h91.429v-7.314z" />
+    </svg>
+  );
+
   // ----- Secciones reutilizables para poder cambiar el orden -----
 
   const categorySection = (
@@ -665,6 +728,7 @@ const winnersByCategory = React.useMemo(() => {
               const isOpen = expandedPredictionId === p.id;
               const isMine = user && p.user_id === user.id;
               const canManage = isMine || isAdmin;
+              const canSeePicks = isAdmin || isMine || !hideOthersPicks;
 
               return (
                 <div
@@ -695,11 +759,15 @@ const winnersByCategory = React.useMemo(() => {
 
                     <div className="flex gap-2 flex-wrap">
                       <button
-                        onClick={() =>
+                        onClick={() => {
+                          if (!canSeePicks) {
+                            setShowRestrictionModal(true);
+                            return;
+                          }
                           setExpandedPredictionId(
                             isOpen ? null : p.id
-                          )
-                        }
+                          );
+                        }}
                         className="px-4 py-2 rounded-xl border transition"
                         style={{
                           borderColor: "rgba(212,175,55,0.45)",
@@ -716,7 +784,7 @@ const winnersByCategory = React.useMemo(() => {
                           e.currentTarget.style.color = OSCAR_GOLD;
                         }}
                       >
-                        {isOpen ? "Ocultar" : "Ver picks"}
+                        {isOpen && canSeePicks ? "Ocultar" : "Ver picks"}
                       </button>
 
                       {canManage && (
@@ -739,7 +807,7 @@ const winnersByCategory = React.useMemo(() => {
                     </div>
                   </div>
 
-                  {isOpen && (
+                  {isOpen && canSeePicks && (
                     <div className="mt-5 border-t border-white/10 pt-4">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         {categories.map((c) => (
@@ -787,9 +855,9 @@ const winnersByCategory = React.useMemo(() => {
           return (
             <div className="mt-12 mb-16 rounded-3xl border border-white/15 bg-black/60 px-6 py-6">
               <h2
-                  className="text-2xl font-bold text-center mb-6"
-                  style={{ color: OSCAR_GOLD }}
-                >
+                className="text-2xl font-bold text-center mb-6"
+                style={{ color: OSCAR_GOLD }}
+              >
                 Marcador
               </h2>
               <p className="text-center text-gray-400">
@@ -799,7 +867,7 @@ const winnersByCategory = React.useMemo(() => {
           );
         }
 
-        // 🧮 Configuración de alturas dinámicas
+        // Configuración de alturas dinámicas
         const maxPoints = scoreboard[0]?.points ?? 0; // el que va ganando
         const MIN_HEIGHT = 180;
         const MAX_HEIGHT = 260;
@@ -982,8 +1050,6 @@ const winnersByCategory = React.useMemo(() => {
     </>
   );
 
-
-
   return (
     <div
       className="min-h-screen w-full"
@@ -1111,7 +1177,8 @@ const winnersByCategory = React.useMemo(() => {
             )}
           </div>
         </header>
-                {scoreboardFirst ? (
+
+        {scoreboardFirst ? (
           <>
             {scoreboardSection}
             {predictionsSection}
@@ -1125,7 +1192,6 @@ const winnersByCategory = React.useMemo(() => {
           </>
         )}
       </div>
-
 
       {/* Modal de predicción */}
       {modalOpen && (
@@ -1373,7 +1439,6 @@ const winnersByCategory = React.useMemo(() => {
               </button>
             </div>
 
-
             {/* Tabs */}
             <div className="px-6 sm:px-7 pt-4 border-b border-white/10">
               <div className="inline-flex rounded-xl bg-white/5 border border-white/10 overflow-hidden">
@@ -1405,75 +1470,33 @@ const winnersByCategory = React.useMemo(() => {
             {/* TAB 1: Manejo de predicciones */}
             {activeAdminTab === "predictions" && (
               <>
-                            <div className="p-6 sm:p-7 border-b border-white/10">
-              <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
-                <input
-                  value={adminFilter}
-                  onChange={(e) => setAdminFilter(e.target.value)}
-                  className="w-full md:w-2/3 rounded-xl border px-4 py-2 text-sm bg-transparent focus:outline-none"
-                  style={{
-                    borderColor: "rgba(255,255,255,0.18)",
-                    color: OSCAR_TEXT,
-                  }}
-                  placeholder="Buscar por correo (ej. alguien@mail.com) o nombre..."
-                />
-                <button
-                  type="button"
-                  onClick={handleAdminBulkDelete}
-                  disabled={!adminFilter.trim()}
-                  className="px-4 py-2 rounded-xl border text-sm transition disabled:opacity-40 disabled:cursor-not-allowed border-red-500 text-red-400 hover:bg-red-500 hover:text-black"
-                >
-                  Borrar todas las de este correo
-                </button>
-              </div>
-
-              <div className="text-xs text-white/40 mt-2">
-                Nota: el borrado masivo usa coincidencia exacta con el campo
-                correo (email).
-              </div>
-
-              {/* Toggle para ocultar/mostrar picks de otros usuarios */}
-              <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-sm text-white/80">
-                <div>
-                  <div className="font-semibold">
-                    Visibilidad de predicciones
+                <div className="p-6 sm:p-7 border-b border-white/10">
+                  <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
+                    <input
+                      value={adminFilter}
+                      onChange={(e) => setAdminFilter(e.target.value)}
+                      className="w-full md:w-2/3 rounded-xl border px-4 py-2 text-sm bg-transparent focus:outline-none"
+                      style={{
+                        borderColor: "rgba(255,255,255,0.18)",
+                        color: OSCAR_TEXT,
+                      }}
+                      placeholder="Buscar por correo (ej. alguien@mail.com) o nombre..."
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAdminBulkDelete}
+                      disabled={!adminFilter.trim()}
+                      className="px-4 py-2 rounded-xl border text-sm transition disabled:opacity-40 disabled:cursor-not-allowed border-red-500 text-red-400 hover:bg-red-500 hover:text-black"
+                    >
+                      Borrar todas las de este correo
+                    </button>
                   </div>
-                  <div className="text-xs text-white/50 mt-1">
-                    Cuando está activado, cada usuario solo puede ver sus propios picks.
-                    El admin siempre puede ver todo.
+
+                  <div className="text-xs text-white/40 mt-2">
+                    Nota: el borrado masivo usa coincidencia exacta con el campo
+                    correo (email).
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setHideOthersPicks((prev) => !prev)}
-                  className="px-4 py-2 rounded-xl border text-xs font-semibold transition"
-                  style={{
-                    borderColor: "rgba(212,175,55,0.45)",
-                    color: hideOthersPicks ? OSCAR_GOLD : "white",
-                    backgroundColor: hideOthersPicks
-                      ? "rgba(212,175,55,0.15)"
-                      : "transparent",
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = OSCAR_GOLD;
-                    e.currentTarget.style.color = "black";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = hideOthersPicks
-                      ? "rgba(212,175,55,0.15)"
-                      : "transparent";
-                    e.currentTarget.style.color = hideOthersPicks
-                      ? OSCAR_GOLD
-                      : "white";
-                  }}
-                >
-                  {hideOthersPicks
-                    ? "Ocultar picks de otros"
-                    : "Permitir ver picks de otros"}
-                </button>
-              </div>
-            </div>
-
 
                 <div className="p-6 sm:p-7 max-h-[60vh] overflow-y-auto">
                   {adminFilteredPredictions.length === 0 ? (
@@ -1589,7 +1612,11 @@ const winnersByCategory = React.useMemo(() => {
                 </p>
                 <button
                   type="button"
-                  onClick={() => setScoreboardFirst((prev) => !prev)}
+                  onClick={() =>
+                    updateGlobalSettings({
+                      scoreboard_on_top: !scoreboardFirst,
+                    })
+                  }
                   className="self-start px-4 py-2 rounded-xl border text-sm font-semibold transition mb-2"
                   style={{
                     borderColor: "rgba(212,175,55,0.45)",
@@ -1607,7 +1634,52 @@ const winnersByCategory = React.useMemo(() => {
                   {scoreboardFirst ? "Vista normal" : "Mostrar marcador arriba"}
                 </button>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Toggle global de visibilidad de predicciones */}
+                <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-sm text-white/80">
+                  <div>
+                    <div className="font-semibold">
+                      Visibilidad de predicciones
+                    </div>
+                    <div className="text-xs text-white/50 mt-1">
+                      Cuando está activado, cada usuario solo puede ver sus propios picks.
+                      El admin siempre puede ver todo.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateGlobalSettings({
+                        hide_others_picks: !hideOthersPicks,
+                      })
+                    }
+                    className="px-4 py-2 rounded-xl border text-xs font-semibold transition"
+                    style={{
+                      borderColor: "rgba(212,175,55,0.45)",
+                      color: hideOthersPicks ? OSCAR_GOLD : "white",
+                      backgroundColor: hideOthersPicks
+                        ? "rgba(212,175,55,0.15)"
+                        : "transparent",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = OSCAR_GOLD;
+                      e.currentTarget.style.color = "black";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = hideOthersPicks
+                        ? "rgba(212,175,55,0.15)"
+                        : "transparent";
+                      e.currentTarget.style.color = hideOthersPicks
+                        ? OSCAR_GOLD
+                        : "white";
+                    }}
+                  >
+                    {hideOthersPicks
+                      ? "Ocultar picks de otros"
+                      : "Permitir ver picks de otros"}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                   {categories.map((c) => {
                     const winner = winnersByCategory[c.id];
 
@@ -1663,6 +1735,7 @@ const winnersByCategory = React.useMemo(() => {
           </div>
         </div>
       )}
+
       {/* Modal elegir ganador (admin) */}
       {winnerModalCategoryId && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-4">
@@ -1769,6 +1842,50 @@ const winnersByCategory = React.useMemo(() => {
               </div>
             );
           })()}
+        </div>
+      )}
+
+      {/* Modal de restricción de visibilidad de picks */}
+      {showRestrictionModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-4">
+          <div
+            className="w-full max-w-md rounded-3xl shadow-xl p-6 sm:p-7 text-center"
+            style={{
+              backgroundColor: "black",
+              border: "1px solid rgba(212,175,55,0.40)",
+            }}
+          >
+            <h2
+              className="text-2xl font-bold mb-3"
+              style={{ color: OSCAR_GOLD }}
+            >
+              Picks ocultos hasta la ceremonia
+            </h2>
+            <p className="text-sm text-white/70 mb-4">
+              Los picks de otros participantes están ocultos para que nadie copie
+              las predicciones. Podrás verlos después de la ceremonia de los
+              Óscares.
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowRestrictionModal(false)}
+              className="px-5 py-2 rounded-xl border text-sm font-semibold transition"
+              style={{
+                borderColor: "rgba(212,175,55,0.45)",
+                color: OSCAR_GOLD,
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = OSCAR_GOLD;
+                e.currentTarget.style.color = "black";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = "transparent";
+                e.currentTarget.style.color = OSCAR_GOLD;
+              }}
+            >
+              Entendido
+            </button>
+          </div>
         </div>
       )}
     </div>
